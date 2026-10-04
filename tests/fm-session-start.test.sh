@@ -1458,6 +1458,8 @@ if [ "\${1:-}" = auth ]; then
   [ -z '$finished_marker' ] || : > '$finished_marker'
   exit 1
 fi
+# An unreachable host fails the REST fallback probe too.
+[ "\${1:-}" = api ] && exit 1
 exit 0
 SH
   chmod +x "$fakebin/gh"

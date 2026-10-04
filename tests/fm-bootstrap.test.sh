@@ -928,6 +928,38 @@ SH
   pass "bootstrap: FM_BOOTSTRAP_NETWORK partitions one run into local and network halves"
 }
 
+# Claude Code cloud sessions block GraphQL, which is what `gh auth status` uses
+# to validate a token, while REST works. A working login must not be reported
+# as bad there, and a login that fails every call must still be reported.
+test_gh_auth_probe_falls_back_to_rest_when_graphql_is_blocked() {
+  local case_dir fakebin calls out
+  case_dir="$TMP_ROOT/gh-auth-rest-fallback"
+  mkdir -p "$case_dir/home/config"
+  printf '%s\n' manual > "$case_dir/home/config/backlog-backend"
+  fakebin=$(make_fake_toolchain "$case_dir")
+  calls="$case_dir/gh-calls"
+  cat > "$fakebin/gh" <<SH
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> '$calls'
+[ "\${1:-}" = api ] && [ "\${FM_FAKE_GH_REST:-ok}" = ok ] && exit 0
+exit 1
+SH
+  chmod +x "$fakebin/gh"
+
+  out=$(PATH="$fakebin:$BASE_PATH" FM_HOME="$case_dir/home" FM_ROOT_OVERRIDE="$case_dir/home" \
+    FM_FAKE_TREEHOUSE_LEASE_HELP=1 FM_BOOTSTRAP_NETWORK=only "$ROOT/bin/fm-bootstrap.sh")
+  assert_not_contains "$out" "NEEDS_GH_AUTH" \
+    "a login whose REST calls work was reported as needing authentication"
+  assert_contains "$(cat "$calls")" "api user" \
+    "the failed status check never fell back to a REST call"
+
+  out=$(PATH="$fakebin:$BASE_PATH" FM_HOME="$case_dir/home" FM_ROOT_OVERRIDE="$case_dir/home" \
+    FM_FAKE_TREEHOUSE_LEASE_HELP=1 FM_FAKE_GH_REST=fail FM_BOOTSTRAP_NETWORK=only "$ROOT/bin/fm-bootstrap.sh")
+  assert_contains "$out" "NEEDS_GH_AUTH" \
+    "a login that fails the REST call too was not reported"
+  pass "bootstrap: a blocked GraphQL status check falls back to REST before reporting a bad login"
+}
+
 test_network_sweeps_recheck_lock_ownership() {
   local case_dir fakebin fake_root marker out
   case_dir="$TMP_ROOT/network-lock-handoff"
@@ -1171,6 +1203,7 @@ test_fleet_sync_timeout_is_computed_before_launch
 test_routine_bootstrap_confirmations_are_silent
 test_routine_bootstrap_contract_runs_under_system_bash
 test_network_phase_partitions_the_run
+test_gh_auth_probe_falls_back_to_rest_when_graphql_is_blocked
 test_network_sweeps_recheck_lock_ownership
 test_network_phases_record_per_step_elapsed_times
 test_tasks_axi_verdict_handoff_is_consumed_once
