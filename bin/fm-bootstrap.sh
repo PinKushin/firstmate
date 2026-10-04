@@ -121,7 +121,8 @@
 #                 reconciliation, no x_mode_setup: those already ran on the
 #                 local pass.
 #          FM_BOOTSTRAP_DETECT_ONLY composes with it unchanged, so `only` plus
-#          detect-only is the read-only `gh auth status` probe on its own.
+#          detect-only is the read-only GitHub-auth probe on its own (`gh auth
+#          status`, then one `gh api user` REST call when GraphQL is blocked).
 #          bin/fm-startup-network.sh owns the deferral: it runs the `only` phase
 #          in a detached bounded worker and publishes the result. This file stays
 #          the single owner of every sweep, and the split changes only WHEN each
@@ -1535,7 +1536,10 @@ detect_home_summary_publication() {
 local_phase && detect_local_tools
 if network_phase; then
   __fm_timing_stamp=$(fm_timing_now_ms)
-  gh auth status >/dev/null 2>&1 || echo "NEEDS_GH_AUTH"
+  # `gh auth status` validates the token through GraphQL, which Claude Code cloud
+  # sessions block with a 403 even for a working token, so a failed status check
+  # gets one REST call before it is reported as a bad login.
+  gh auth status >/dev/null 2>&1 || gh api user --silent >/dev/null 2>&1 || echo "NEEDS_GH_AUTH"
   fm_timing_record phase gh-auth "$__fm_timing_stamp"
 fi
 local_phase && detect_local_config
