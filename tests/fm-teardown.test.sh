@@ -3890,6 +3890,47 @@ EOF
   pass "missing lsof falls back to reaping the tmux pane process group"
 }
 
+# psmux reports a Win32 #{pane_pid} that MSYS ps and kill cannot identity-check
+# or signal, so the lsof-less process-group reap must step aside with a warning
+# instead of signalling whichever MSYS process shares that number. The decoy
+# here is a real process group whose id the fake tmux reports as the pane pid:
+# the native path above reaps it, so a survivor proves the psmux branch ran.
+test_lsof_absent_psmux_steps_aside_from_process_group() {
+  local case_dir rc pid path_without_lsof
+  case_dir=$(make_case lsof-absent-psmux-step-aside)
+  write_meta "$case_dir" no-mistakes ship
+  land_shippable_commit "$case_dir"
+  path_without_lsof=$(make_path_without_lsof "$case_dir")
+
+  perl -e 'setpgrp(0, 0); chdir shift or die; exec "sleep", "300"' "$case_dir/wt" &
+  pid=$!
+  disown
+  sleep 0.3
+  kill -0 "$pid" 2>/dev/null || fail "lsof-absent-psmux: setup sleeper did not start"
+  cat > "$case_dir/fakebin/tmux" <<EOF
+#!/usr/bin/env bash
+if [ "\${1:-}" = display-message ] && [ "\${*: -1}" = '#{pane_pid}' ]; then
+  printf '%s\n' '$pid'
+fi
+exit 0
+EOF
+  chmod +x "$case_dir/fakebin/tmux"
+
+  rc=0
+  PSMUX_SESSION=fake-session FM_TEARDOWN_TEST_PATH="$path_without_lsof" \
+    run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
+  expect_code 0 "$rc" "lsof-absent-psmux: teardown should still succeed"
+  if ! kill -0 "$pid" 2>/dev/null; then
+    fail "lsof-absent-psmux: the Windows pane pid was signalled as an MSYS process group"
+  fi
+  kill -KILL "$pid" 2>/dev/null || true
+  assert_grep "psmux reports Windows pane PIDs this shell cannot signal" "$case_dir/stderr" \
+    "lsof-absent-psmux: teardown did not explain that it stepped aside"
+  assert_no_grep "reaping leaked worktree process group" "$case_dir/stderr" \
+    "lsof-absent-psmux: teardown reaped a process group under psmux"
+  pass "missing lsof under psmux steps aside from the process-group reap with a warning"
+}
+
 test_lsof_error_refuses_before_removal() {
   local case_dir rc
   case_dir=$(make_case lsof-error-refusal)
@@ -4458,6 +4499,7 @@ test_own_autonomous_run_is_left_alone
 test_leaked_worktree_process_is_reaped
 test_leaked_tasktmp_process_is_reaped
 test_lsof_absent_reaps_tmux_process_group
+test_lsof_absent_psmux_steps_aside_from_process_group
 test_lsof_error_refuses_before_removal
 test_reused_pid_identity_is_not_force_killed
 test_exec_changed_process_is_still_reaped

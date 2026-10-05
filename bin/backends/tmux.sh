@@ -24,6 +24,8 @@
 . "$FM_BACKEND_LIB_DIR/fm-session-lock-lib.sh"
 # shellcheck source=bin/fm-agent-process-lib.sh
 . "$FM_BACKEND_LIB_DIR/fm-agent-process-lib.sh"
+# shellcheck source=bin/fm-psmux-lib.sh
+. "$FM_BACKEND_LIB_DIR/fm-psmux-lib.sh"
 
 # fm_backend_tmux_resolve_bare_selector: the live-window-listing fallback for a
 # selector that is neither an explicit target nor a task selector routed
@@ -94,13 +96,28 @@ fm_backend_tmux_container_ensure() {
 #     treehouse cd's into the worktree, which would break name-based targeting.
 # The returned window id lets callers target the window even if its name is ever
 # lost, so worktree discovery cannot fall back to the active client's window.
+#
+# Under psmux (bin/fm-psmux-lib.sh) the window runs Git Bash explicitly as the
+# command of new-window - psmux panes otherwise default to PowerShell, and every
+# line fm-spawn.sh types is bash - and -c takes the Windows form of the project
+# path. Neither touches the user's psmux config.
 fm_backend_tmux_create_task() {  # <session> <window-name> <proj-abs> -> prints window id
-  local ses=$1 wname=$2 proj_abs=$3 wid
+  local ses=$1 wname=$2 proj_abs=$3 wid pane_shell native_dir
   if tmux list-windows -t "$ses" -F '#{window_name}' | grep -qx "$wname"; then
     echo "error: window $ses:$wname already exists" >&2
     return 1
   fi
-  wid=$(tmux new-window -dP -F '#{window_id}' -t "$ses:" -n "$wname" -c "$proj_abs") || return 1
+  if fm_psmux_active; then
+    pane_shell=$(fm_psmux_pane_shell) || {
+      echo "error: cannot resolve a bash executable for the psmux task window $ses:$wname" >&2
+      return 1
+    }
+    native_dir=$(fm_psmux_path_to_native "$proj_abs")
+    wid=$(tmux new-window -dP -F '#{window_id}' -t "$ses:" -n "$wname" -c "$native_dir" -- "$pane_shell" -i) || return 1
+    wid=${wid%$'\r'}
+  else
+    wid=$(tmux new-window -dP -F '#{window_id}' -t "$ses:" -n "$wname" -c "$proj_abs") || return 1
+  fi
   tmux set-window-option -t "$wid" automatic-rename off 2>/dev/null || true
   tmux set-window-option -t "$wid" allow-rename off 2>/dev/null || true
   printf '%s\n' "$wid"
@@ -109,7 +126,17 @@ fm_backend_tmux_create_task() {  # <session> <window-name> <proj-abs> -> prints 
 # fm_backend_tmux_current_path: the live pane's current working directory, or
 # empty on any tmux error. Mirrors fm-spawn.sh's worktree-discovery poll:
 # `tmux display-message -p -t "$T" '#{pane_current_path}'`.
+# psmux answers with a Windows path (`C:\Users\x\wt`) while every comparison
+# in fm-spawn.sh is against a Git Bash POSIX path, so under psmux the value is
+# normalized with cygpath -u before it leaves this function.
 fm_backend_tmux_current_path() {  # <target>
+  local path
+  if fm_psmux_active; then
+    path=$(tmux display-message -p -t "$1" '#{pane_current_path}' 2>/dev/null) || return 1
+    path=${path%$'\r'}
+    [ -z "$path" ] || fm_psmux_path_to_posix "$path"
+    return 0
+  fi
   tmux display-message -p -t "$1" '#{pane_current_path}' 2>/dev/null
 }
 
@@ -146,6 +173,9 @@ fm_backend_tmux_send_literal() {  # <target> <text>
 fm_backend_tmux_window_inventory() {  # <session-target>
   local windows
   if windows=$(LC_ALL=C tmux list-windows -t "$1" -F '#{window_name}' 2>&1); then
+    # An exact whole-line window match must not be defeated by a CR from a
+    # native Windows tmux, or an existing window would read as missing.
+    if fm_psmux_active; then windows=${windows//$'\r'/}; fi
     printf '%s\n' "$windows"
     return 0
   fi
@@ -242,12 +272,20 @@ fm_backend_tmux_current_command() {  # <target>
 # `pi-signed` wrapper and a `pi` engine in one group), so no launcher needs its
 # own special case here.
 #
+# Under psmux all four foreground readers below return nothing at once:
+# `#{pane_tty}` is synthetic there (`/dev/pty<pane id>`), and a Git Bash
+# `ps -t pty<N>` would instead match an unrelated mintty tty of the same
+# number. fm_backend_tmux_agent_state then classifies from
+# `#{pane_current_command}` alone, which psmux resolves with a real Windows
+# process walk (docs/tmux-backend.md "psmux on Windows").
+#
 # Like fm_backend_tmux_current_command this is a RAW pane read: tmux answers an
 # absent target from the client's active window rather than failing, so callers
 # must confirm exact window membership first, exactly as the classifier below
 # does, or they will describe some other pane entirely.
 fm_backend_tmux_foreground_comms() {  # <target>
   local target=$1 tty pid pgid tpgid comm
+  fm_psmux_active && return 0
   tty=$(tmux display-message -p -t "$target" '#{pane_tty}' 2>/dev/null) || return 0
   [ -n "$tty" ] || return 0
   LC_ALL=C ps -t "${tty#/dev/}" -o pid=,pgid=,tpgid=,comm= 2>/dev/null \
@@ -263,6 +301,7 @@ fm_backend_tmux_foreground_comms() {  # <target>
 # argv[0]; bin/fm-gemini-lib.sh owns what counts as evidence inside one.
 fm_backend_tmux_foreground_args() {  # <target>
   local target=$1 tty pid pgid tpgid comm args
+  fm_psmux_active && return 0
   tty=$(tmux display-message -p -t "$target" '#{pane_tty}' 2>/dev/null) || return 0
   [ -n "$tty" ] || return 0
   LC_ALL=C ps -t "${tty#/dev/}" -o pid=,pgid=,tpgid=,comm= 2>/dev/null \
@@ -276,6 +315,7 @@ fm_backend_tmux_foreground_args() {  # <target>
 
 fm_backend_tmux_foreground_pids() {  # <target>
   local target=$1 tty pid pgid tpgid comm
+  fm_psmux_active && return 0
   tty=$(tmux display-message -p -t "$target" '#{pane_tty}' 2>/dev/null) || return 0
   [ -n "$tty" ] || return 0
   LC_ALL=C ps -t "${tty#/dev/}" -o pid=,pgid=,tpgid=,comm= 2>/dev/null \
@@ -288,6 +328,7 @@ fm_backend_tmux_foreground_pids() {  # <target>
 
 fm_backend_tmux_foreground_argv0s() {  # <target>
   local target=$1 tty pid pgid tpgid comm args argv0
+  fm_psmux_active && return 0
   tty=$(tmux display-message -p -t "$target" '#{pane_tty}' 2>/dev/null) || return 0
   [ -n "$tty" ] || return 0
   LC_ALL=C ps -t "${tty#/dev/}" -o pid=,pgid=,tpgid=,comm= 2>/dev/null \
@@ -299,6 +340,18 @@ fm_backend_tmux_foreground_argv0s() {  # <target>
         argv0=${args%%[[:space:]]*}
         [ -n "$argv0" ] && printf '%s\n' "$argv0"
       done
+}
+
+# fm_backend_tmux_classify_command: agent|shell|other for one
+# `#{pane_current_command}` value. Native tmux values go straight to the shared
+# vocabulary; psmux values (file stems with real casing, PowerShell as the
+# default shell) are normalized first by bin/fm-psmux-lib.sh.
+fm_backend_tmux_classify_command() {  # <command>
+  if fm_psmux_active; then
+    fm_psmux_classify_name "$1"
+  else
+    fm_agent_process_classify_name "$1"
+  fi
 }
 
 # fm_backend_tmux_agent_state: recovery-grade harness-agent state for one
@@ -397,7 +450,7 @@ EOF
     printf 'unreadable'
     return 0
   }
-  if [ "$(fm_agent_process_classify_name "$comm")" = agent ]; then
+  if [ "$(fm_backend_tmux_classify_command "$comm")" = agent ]; then
     printf 'alive'
     return 0
   fi
@@ -416,7 +469,7 @@ EOF
   case "$comm" in
     '') printf 'unreadable'; return 0 ;;
   esac
-  case "$(fm_agent_process_classify_name "$comm")" in
+  case "$(fm_backend_tmux_classify_command "$comm")" in
     shell) printf 'dead' ;;
     *) printf 'ambiguous' ;;
   esac

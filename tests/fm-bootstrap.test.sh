@@ -582,6 +582,70 @@ SH
   pass "bootstrap requires git with an install instruction"
 }
 
+# On a Windows shell (Git Bash) the tmux backend runs on psmux. A missing tmux
+# reports the psmux install command, a tmux that is not psmux reports psmux as
+# the missing tool, and psmux itself - or any non-Windows host - stays silent.
+# FM_PSMUX_HOST stands in for the host-OS read that OSTYPE gives a real shell.
+test_windows_shell_requires_psmux_for_tmux() {
+  local case_dir fakebin out hint
+  hint="winget install psmux  # or: choco install psmux, cargo install psmux, scoop (see https://github.com/psmux/psmux)"
+
+  case_dir="$TMP_ROOT/psmux-tmux-missing"
+  mkdir -p "$case_dir/home/config"
+  printf '%s\n' manual > "$case_dir/home/config/backlog-backend"
+  fakebin=$(make_fake_toolchain "$case_dir")
+  rm -f "$fakebin/tmux"
+  out=$(PATH="$fakebin:$(fm_test_base_path_sans "$BASE_PATH" tmux)" FM_PSMUX_HOST=windows \
+    FM_HOME="$case_dir/home" FM_ROOT_OVERRIDE="$case_dir/home" \
+    FM_FAKE_TREEHOUSE_LEASE_HELP=1 "$ROOT/bin/fm-bootstrap.sh")
+  [ "$out" = "MISSING: tmux (install: $hint)" ] \
+    || fail "a Windows shell without tmux should report the psmux install command, got: $out"
+
+  out=$(PATH="$fakebin:$(fm_test_base_path_sans "$BASE_PATH" tmux)" FM_PSMUX_HOST=posix \
+    FM_HOME="$case_dir/home" FM_ROOT_OVERRIDE="$case_dir/home" \
+    FM_FAKE_TREEHOUSE_LEASE_HELP=1 "$ROOT/bin/fm-bootstrap.sh")
+  [ "$out" = "MISSING: tmux (install: brew install tmux  # or the platform's package manager)" ] \
+    || fail "a POSIX shell without tmux should keep the brew hint, got: $out"
+
+  case_dir="$TMP_ROOT/psmux-tmux-not-psmux"
+  mkdir -p "$case_dir/home/config"
+  printf '%s\n' manual > "$case_dir/home/config/backlog-backend"
+  fakebin=$(make_fake_toolchain "$case_dir")
+  cat > "$fakebin/tmux" <<'SH'
+#!/usr/bin/env bash
+[ "${1:-}" = -V ] && printf 'tmux 3.5a\n'
+exit 0
+SH
+  chmod +x "$fakebin/tmux"
+  out=$(PATH="$fakebin:$BASE_PATH" FM_PSMUX_HOST=windows \
+    FM_HOME="$case_dir/home" FM_ROOT_OVERRIDE="$case_dir/home" \
+    FM_FAKE_TREEHOUSE_LEASE_HELP=1 "$ROOT/bin/fm-bootstrap.sh")
+  [ "$out" = "MISSING: psmux (install: $hint)" ] \
+    || fail "a Windows shell with a non-psmux tmux should report psmux as missing, got: $out"
+
+  out=$(PATH="$fakebin:$BASE_PATH" FM_PSMUX_HOST=posix \
+    FM_HOME="$case_dir/home" FM_ROOT_OVERRIDE="$case_dir/home" \
+    FM_FAKE_TREEHOUSE_LEASE_HELP=1 "$ROOT/bin/fm-bootstrap.sh")
+  [ -z "$out" ] || fail "a POSIX shell with real tmux should stay silent, got: $out"
+
+  cat > "$fakebin/tmux" <<'SH'
+#!/usr/bin/env bash
+[ "${1:-}" = -V ] && printf 'tmux 3.3.8\npsmux 3.3.8 (fake 2026-01-01)\n'
+exit 0
+SH
+  out=$(PATH="$fakebin:$BASE_PATH" FM_PSMUX_HOST=windows \
+    FM_HOME="$case_dir/home" FM_ROOT_OVERRIDE="$case_dir/home" \
+    FM_FAKE_TREEHOUSE_LEASE_HELP=1 "$ROOT/bin/fm-bootstrap.sh")
+  [ -z "$out" ] || fail "a Windows shell with psmux should stay silent, got: $out"
+
+  out=$(PATH="$fakebin:$BASE_PATH" FM_PSMUX_HOST=windows FM_TMUX_FLAVOR=tmux \
+    FM_HOME="$case_dir/home" FM_ROOT_OVERRIDE="$case_dir/home" \
+    FM_FAKE_TREEHOUSE_LEASE_HELP=1 "$ROOT/bin/fm-bootstrap.sh")
+  [ "$out" = "MISSING: psmux (install: $hint)" ] \
+    || fail "FM_TMUX_FLAVOR=tmux on a Windows shell should report psmux as missing, got: $out"
+  pass "bootstrap: a Windows shell needs psmux for the tmux backend, with the psmux install hint"
+}
+
 test_orca_backend_gates_orca_tool_only_when_selected() {
   local case_dir fakebin out missing_orca
   missing_orca="MISSING: orca (install: brew install orca  # or the platform's package manager)"
@@ -1341,6 +1405,7 @@ test_tasks_axi_min_version
 test_quota_axi_min_version
 test_git_is_required_with_supported_install_instruction
 test_orca_backend_gates_orca_tool_only_when_selected
+test_windows_shell_requires_psmux_for_tmux
 test_session_provider_backends_do_not_require_tmux
 test_session_provider_backends_gate_own_cli_not_tmux
 test_herdr_install_requires_manual_action
