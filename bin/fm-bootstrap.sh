@@ -22,6 +22,7 @@
 #                 "BOOTSTRAP_INFO: nudged fm-<id> with '<message>'",
 #                 "SECONDMATE_LIVENESS: secondmate <id>: skipped: <reason>|respawn failed after <cause>: <reason>",
 #                 "SECONDMATE_HANDOFF: secondmate <id>: pending delivery: <n> item(s)",
+#                 "NO_MISTAKES_DAEMON: could not start the no-mistakes daemon: <error>",
 #                 "FMX: X mode on ..." or "FMX: X mode off ...".
 #          When a RUNNING secondmate home is fast-forwarded, its target is
 #          firstmate's own current default-branch commit. A local worktree uses
@@ -101,10 +102,14 @@
 #          The `code-root <file>` variant is a detect-only local check that runs
 #          even in a read-only session; detect_code_root_backlog_fork owns what
 #          it reports.
+#          A locked session also starts the shared no-mistakes daemon when its
+#          status does not report one running (no_mistakes_daemon_ensure; a
+#          reboot takes it down) and prints a BOOTSTRAP_INFO fact; a running
+#          daemon is never stopped, restarted, or refreshed.
 #          Set FM_BOOTSTRAP_DETECT_ONLY=1 to skip the six MUTATING sweeps
 #          (backlog_record_reconcile, secondmate_sync,
 #          secondmate_liveness_sweep, secondmate_handoff_resume, x_mode_setup,
-#          fleet_sync) while still
+#          fleet_sync) and the daemon start while still
 #          printing every read-only detect line
 #          above; the TANGLE line switches to advisory-only wording with no
 #          checkout command. Used by
@@ -944,6 +949,27 @@ x_mode_remove_artifact() {
   ! x_mode_artifact_present "$artifact"
 }
 
+# no-mistakes_daemon_ensure: a host or container reboot takes the shared
+# no-mistakes daemon down with every other process, and nothing else brings it
+# back before the first pipeline run needs it. When it is installed and its
+# status does not report a running daemon, start it. A RUNNING daemon is never
+# stopped, restarted, or refreshed: it serves every lane and home, so the only
+# action here is the start of an absent one. Local (a unix socket), so it runs
+# in the local phase and never in a read-only detect session.
+no_mistakes_daemon_ensure() {
+  local status_out start_out
+  command -v no-mistakes >/dev/null 2>&1 || return 0
+  status_out=$(fm_run_timed 30 no-mistakes daemon status 2>&1) || true
+  case "$status_out" in
+    *"daemon running"*) return 0 ;;
+  esac
+  if start_out=$(fm_run_timed 60 no-mistakes daemon start 2>&1); then
+    echo "BOOTSTRAP_INFO: no-mistakes daemon was not running; started it"
+  else
+    echo "NO_MISTAKES_DAEMON: could not start the no-mistakes daemon: $(printf '%s\n' "$start_out" | sed -n '1p')"
+  fi
+}
+
 # X mode (opt-in): when this home's .env carries a non-empty FMX_PAIRING_TOKEN,
 # wire the relay poll into the existing authenticated watcher dispatch.
 # Drops two idempotent, gitignored artifacts:
@@ -1607,6 +1633,7 @@ if [ "${FM_BOOTSTRAP_DETECT_ONLY:-0}" != 1 ]; then
   fi
   # x_mode_setup writes local Relay artifacts only and never leaves the machine.
   local_phase && x_mode_setup
+  local_phase && no_mistakes_daemon_ensure
   # Adopt existing durable contribution links without making a network call.
   # Detection-only startup must never publish a check registration.
   if local_phase && command -v jq >/dev/null 2>&1 \

@@ -80,7 +80,7 @@ A relaunch does take one session reference when the endpoint's own runtime recor
    A secondmate relaunch does not require one and never rewrites its standing charter.
 4. **Stop the old agent** through the `exit` verb, with its postcondition.
 5. **Launch the replacement** through its single owner, `bin/fm-spawn.sh --relaunch`, which reuses the recorded worktree instead of creating one, adopts the recorded endpoint when it still exists, clears the previous harness's per-task wiring, and arms a fresh busy generation.
-   When the recorded endpoint is proven gone rather than merely idle or unreachable - which only Herdr can establish - the launch owner creates one fresh endpoint in that same worktree and the republished record rebinds the task to it - see [Reclaiming a task whose endpoint is gone](#reclaiming-a-task-whose-endpoint-is-gone).
+   When the recorded endpoint is proven gone rather than merely idle or unreachable - which Herdr can establish, and tmux only across a machine reboot - the launch owner creates one fresh endpoint in that same worktree and the republished record rebinds the task to it - see [Reclaiming a task whose endpoint is gone](#reclaiming-a-task-whose-endpoint-is-gone).
 6. **Preserve runtime-bound status authority where supported.**
    The endpoint's runtime may bind pane status to one session identity; the launch owner preserves it only when that runtime records a reference the replacement adapter can consume, and otherwise launches the ordinary fresh session.
    This reference is a launch input, never authority to send, close, or act on the pane.
@@ -93,7 +93,7 @@ Switching harness is therefore one ordinary relaunch rather than a separate mech
 A Herdr pane or workspace can be destroyed out from under a live task by churn or a session restart.
 The task's worktree, branch, commits, and uncommitted changes all survive that; only its terminal does not.
 
-**Reclaim is Herdr-only.** On tmux, both verbs refuse a `missing` endpoint, leaving it exactly as deadlocked as it was before this mechanism existed - deliberately, and with the reason stated rather than guessed past.
+**On tmux, reclaim needs a machine reboot as proof.** Otherwise both verbs refuse a `missing` tmux endpoint, leaving it exactly as deadlocked as it was before this mechanism existed - deliberately, and with the reason stated rather than guessed past.
 
 Two endpoint verdicts are agent-free, and both license a relaunch:
 
@@ -110,7 +110,13 @@ An unreachable endpoint can still hold the live agent a rebind would duplicate, 
   So in that state `exit` - which otherwise reads as a read-only inspection - leaves an idle herdr server behind.
 - **tmux cannot.** `list-windows -a` describes only the tmux server the *current process* addresses (its `TMUX_TMPDIR`/socket), and a task record carries no socket identity for its endpoint.
   A different but running server would answer "not anywhere" about a window it was never able to see, so a server-wide read cannot tell a destroyed window from one on a server this process cannot address.
-  There is no read available that closes that gap, so tmux always refuses - for a renamed session, a moved window, a foreign socket, and a dead server alike.
+  There is no read available that closes that gap, so a tmux read alone always refuses - for a renamed session, a moved window, a foreign socket, and a dead server alike.
+- **tmux can prove it across a reboot.** Every ship or scout launch and relaunch records the machine's boot identity as `boot_id=` in its task record (`bin/fm-boot-identity-lib.sh` owns it; on Linux it is `/proc/sys/kernel/random/boot_id`, and a platform without a reliable one records nothing).
+  When that recorded identity exists and differs from the current one, the machine has rebooted since the launch, so no process of it - the tmux server and the agent alike - can still be running, and the endpoint is proven gone.
+  The relaunch then opens one fresh window in the recorded worktree and rebinds the record to it; the worktree is never touched.
+  A matching, unrecorded, or unreadable identity keeps the refusal, so a record written before this mechanism, or on a platform without a boot identity, behaves exactly as before.
+  Session start lists such a task with the relaunch command that brings it back; the relaunch itself stays a supervisor action because it needs a progress note.
+  A reboot also takes down the shared no-mistakes daemon, so a locked session start starts it when its status does not report it running, and never stops or restarts a running one.
 
 Every transient or self-contradicting read stays `unreadable` or `ambiguous` and still refuses, so a momentary backend failure can never be mistaken for absence.
 

@@ -1910,6 +1910,90 @@ test_tmux_refuses_when_the_server_is_gone() {
   pass "tmux: a dead server on this socket refuses both verbs rather than proving absence"
 }
 
+# --- 7b. tmux reclaim after a reboot ------------------------------------------
+#
+# A reboot kills every process, so a record launched under a different boot
+# identity proves its tmux window and agent are gone even though the record
+# carries no socket identity. FM_BOOT_ID_FILE stands in for the kernel's
+# boot_id so the changed-boot case needs no reboot.
+
+# set_boot_ids <case-dir> <id> <recorded|-> <current|->: record <recorded> in the
+# task's meta (`-` records none) and make the current machine identity <current>
+# (`-` makes it unreadable). Prints the boot-id file the caller passes through
+# FM_BOOT_ID_FILE.
+set_boot_ids() {
+  local dir=$1 id=$2 recorded=$3 current=$4
+  [ "$recorded" = - ] || echo "boot_id=$recorded" >> "$dir/home/state/$id.meta"
+  if [ "$current" = - ]; then
+    printf '%s\n' "$dir/no-such-boot-id"
+  else
+    printf '%s\n' "$current" > "$dir/boot-id"
+    printf '%s\n' "$dir/boot-id"
+  fi
+}
+
+test_tmux_reclaims_a_window_after_a_reboot_and_leaves_the_worktree_alone() {
+  local dir out rc bootfile head_before
+  dir=$(new_case tmux-reboot rl64)
+  add_ship_task "$dir" rl64 claude
+  bootfile=$(set_boot_ids "$dir" rl64 11111111-aaaa-bbbb-cccc-000000000001 22222222-aaaa-bbbb-cccc-000000000002)
+  strand_endpoint "$dir" rl64
+  printf 'zsh' > "$dir/fake/command"
+  printf 'uncommitted work\n' > "$dir/wt/unlanded.txt"
+  head_before=$(git -C "$dir/wt" rev-parse HEAD)
+
+  out=$(FM_BOOT_ID_FILE="$bootfile" run_control "$dir" rl64 exit); rc=$?
+  expect_code 0 "$rc" "exit should prove the window gone once the boot identity changed"$'\n'"$out"
+  assert_contains "$out" "endpoint-gone" "exit should report the endpoint did not survive the reboot"
+
+  out=$(FM_BOOT_ID_FILE="$bootfile" run_control "$dir" rl64 relaunch --note "resume after the machine rebooted"); rc=$?
+  expect_code 0 "$rc" "relaunch should re-create the window once the boot identity changed"$'\n'"$out"
+  assert_grep "fm-rl64" "$dir/fake/created-windows" "relaunch must create the replacement window"
+  # The container is whichever session an ordinary spawn would use (the stub
+  # answers `fakepane` when run inside tmux, `firstmate` otherwise).
+  case "$(meta_field "$dir" rl64 window)" in
+    fakepane:fm-rl64 | firstmate:fm-rl64) ;;
+    *) fail "the record must rebind to the re-created window, got '$(meta_field "$dir" rl64 window)'" ;;
+  esac
+  [ "$(meta_field "$dir" rl64 boot_id)" = 22222222-aaaa-bbbb-cccc-000000000002 ] \
+    || fail "the relaunch must record the current boot identity"
+  [ "$(meta_field "$dir" rl64 worktree)" = "$dir/wt" ] || fail "the worktree binding must not move"
+  [ "$(git -C "$dir/wt" rev-parse HEAD)" = "$head_before" ] || fail "the worktree HEAD must not move"
+  [ "$(cat "$dir/wt/unlanded.txt")" = "uncommitted work" ] || fail "uncommitted work in the worktree must survive untouched"
+  assert_grep "Firstmate operational input waiting: read" "$dir/fake/literal" "the replacement agent should have been launched"
+  pass "tmux: a window missing under a changed boot identity is re-created in its worktree and the record rebinds"
+}
+
+test_tmux_refusal_is_preserved_when_the_boot_identity_matches() {
+  local dir bootfile
+  dir=$(new_case tmux-sameboot rl65)
+  add_ship_task "$dir" rl65 claude
+  bootfile=$(set_boot_ids "$dir" rl65 11111111-aaaa-bbbb-cccc-000000000001 11111111-aaaa-bbbb-cccc-000000000001)
+  strand_endpoint "$dir" rl65
+  FM_BOOT_ID_FILE="$bootfile" assert_tmux_missing_refuses "$dir" rl65 "boot identity unchanged"
+  pass "tmux: an unchanged boot identity keeps the refusal on both verbs"
+}
+
+test_tmux_refusal_is_preserved_when_no_boot_identity_was_recorded() {
+  local dir bootfile
+  dir=$(new_case tmux-noboot rl66)
+  add_ship_task "$dir" rl66 claude
+  bootfile=$(set_boot_ids "$dir" rl66 - 22222222-aaaa-bbbb-cccc-000000000002)
+  strand_endpoint "$dir" rl66
+  FM_BOOT_ID_FILE="$bootfile" assert_tmux_missing_refuses "$dir" rl66 "no boot identity recorded"
+  pass "tmux: a record with no boot identity keeps the refusal on both verbs"
+}
+
+test_tmux_refusal_is_preserved_when_the_current_boot_identity_is_unreadable() {
+  local dir bootfile
+  dir=$(new_case tmux-unreadableboot rl67)
+  add_ship_task "$dir" rl67 claude
+  bootfile=$(set_boot_ids "$dir" rl67 11111111-aaaa-bbbb-cccc-000000000001 -)
+  strand_endpoint "$dir" rl67
+  FM_BOOT_ID_FILE="$bootfile" assert_tmux_missing_refuses "$dir" rl67 "no current boot identity"
+  pass "tmux: a platform with no readable boot identity keeps the refusal on both verbs"
+}
+
 test_reclaim_refuses_an_unreadable_endpoint() {
   local dir out rc
   dir=$(new_case gone-unreadable rl63)
@@ -2447,6 +2531,10 @@ test_spawn_relaunch_refuses_a_pane_outside_the_worktree
 test_tmux_refuses_a_window_missing_from_its_session
 test_tmux_refuses_a_session_that_cannot_be_found
 test_tmux_refuses_when_the_server_is_gone
+test_tmux_reclaims_a_window_after_a_reboot_and_leaves_the_worktree_alone
+test_tmux_refusal_is_preserved_when_the_boot_identity_matches
+test_tmux_refusal_is_preserved_when_no_boot_identity_was_recorded
+test_tmux_refusal_is_preserved_when_the_current_boot_identity_is_unreadable
 test_reclaim_refuses_an_unreadable_endpoint
 test_herdr_relaunch_resumes_only_the_registered_pi_session
 test_herdr_reclaim_adopts_a_pane_that_outlived_its_server
