@@ -373,6 +373,8 @@ PRIMARY_HARNESS=$("$SCRIPT_DIR/fm-harness.sh" 2>/dev/null || printf unknown)
 . "$SCRIPT_DIR/fm-line-cap-lib.sh"
 # shellcheck source=bin/fm-hold-reason-lib.sh
 . "$SCRIPT_DIR/fm-hold-reason-lib.sh"
+# shellcheck source=bin/fm-boot-identity-lib.sh
+. "$SCRIPT_DIR/fm-boot-identity-lib.sh"
 
 # One tasks-axi compatibility verdict per session start. The probe costs three
 # tasks-axi subprocesses and this digest needs the same answer twice - here for
@@ -910,6 +912,19 @@ for meta in "$STATE"/*.meta; do
         "$backend" "$window" "$ENDPOINT_TIMEOUT"
     else
       printf 'endpoint: dead (backend=%s window=%s)\n' "$backend" "$window"
+      # A dead endpoint under a changed boot identity is a machine reboot, not a
+      # crash: the agent is provably gone and its local copy is intact. Report
+      # it with the one command that brings it back; the relaunch itself needs
+      # a progress note only the supervisor can write, so it is not automatic.
+      # This home's own ship and scout records only - a secondmate has its own
+      # respawn path, and no other home's state is read here.
+      case "$backend:$(fm_meta_get "$meta" kind)" in
+        tmux:ship | tmux:scout | tmux:)
+          if fm_boot_identity_changed "$(fm_meta_get "$meta" boot_id)"; then
+            printf 'recovery: REBOOT - the machine restarted after this worker launched, so its agent is gone and its local copy is intact; bring it back with: bin/fm-control.sh %s relaunch --note "<what to resume>"\n' "$id"
+          fi
+          ;;
+      esac
     fi
   else
     printf 'endpoint: unknown (no window recorded)\n'

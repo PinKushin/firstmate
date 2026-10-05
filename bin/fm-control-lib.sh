@@ -44,6 +44,9 @@
 # fm_control_relaunch_resume_flag below: a reference the endpoint's runtime
 # bound as its status authority is returned to a replacement with that adapter.
 
+# shellcheck source=bin/fm-boot-identity-lib.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/fm-boot-identity-lib.sh"
+
 # The complete control-plane verb allowlist, one per line.
 fm_control_verbs() {
   cat <<'EOF'
@@ -331,23 +334,35 @@ fm_control_backend_state_verified() {  # <backend>
 #     passes `--session <session>`, so the recheck starts and reads the session
 #     the RECORD names, through that session's own socket. The answer is about
 #     the task's endpoint and nothing else.
-#   tmux CANNOT. `list-windows -a` describes only the server the CURRENT
-#     process addresses (its TMUX_TMPDIR/socket), and a task's record does not
-#     carry the endpoint's socket identity - so a different but running server
-#     would answer "not anywhere" about a window it was never able to see.
-#     There is no read available here that closes that gap, so tmux always
-#     returns `unproven` and both verbs refuse. tmux is left exactly as
-#     deadlocked as it was before this change - no worse - but deliberately.
+#   tmux CANNOT prove it from a read. `list-windows -a` describes only the
+#     server the CURRENT process addresses (its TMUX_TMPDIR/socket), and a
+#     task's record does not carry the endpoint's socket identity - so a
+#     different but running server would answer "not anywhere" about a window
+#     it was never able to see. tmux can prove it from the machine instead: the
+#     optional third argument is the boot identity the record was launched
+#     under, and when it exists and differs from the current one the machine has
+#     rebooted since, so no process of that launch - the tmux server and the
+#     agent alike - can still be running and the verdict is `gone`. A matching,
+#     absent, or unreadable identity returns `unproven` and both verbs refuse,
+#     exactly as before.
 #
 # Both control-plane callers share this one implementation so the proof cannot
 # drift into two answers for the same endpoint.
-fm_control_endpoint_absence_verdict() {  # <backend> <target>
-  local backend=${1-} target=${2-}
+fm_control_endpoint_absence_verdict() {  # <backend> <target> [recorded-boot-id]
+  local backend=${1-} target=${2-} recorded_boot=${3-}
   fm_backend_source "$backend" \
     || { printf 'unproven\tbackend %s could not be loaded to prove anything about that endpoint' "'$backend'"; return 0; }
   case "$backend" in
     tmux)
-      printf 'unproven\ttmux absence cannot be proven from a task record: the record does not carry the endpoint'"'"'s socket identity, and a server-wide window inventory only describes the tmux server this process addresses, so a window absent from it may still be alive on another'
+      # A reboot kills every process, so a record launched under a different
+      # boot identity names an endpoint and an agent that cannot still exist,
+      # wherever its tmux server lived (bin/fm-boot-identity-lib.sh owns the
+      # identity). No recorded or no current identity proves nothing.
+      if fm_boot_identity_changed "$recorded_boot"; then
+        printf 'gone\t'
+      else
+        printf 'unproven\ttmux absence cannot be proven from a task record: the record does not carry the endpoint'"'"'s socket identity, and a server-wide window inventory only describes the tmux server this process addresses, so a window absent from it may still be alive on another (a record that names a boot identity differing from the current one would prove it, but this one does not)'
+      fi
       ;;
     herdr)
       # Start the RECORDED session's server (only the server - nothing is

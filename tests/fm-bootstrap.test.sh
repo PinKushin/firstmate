@@ -82,6 +82,26 @@ if [ "${1:-}" = --version ]; then
   printf '%s\n' "${FM_FAKE_NO_MISTAKES_VERSION:-no-mistakes version v1.46.0 (fake) 2026-06-27T00:02:18Z}"
   exit 0
 fi
+# The shared daemon: FM_FAKE_NM_DIR holds its modelled state (daemon-up exists
+# while it runs; every call is logged to calls). Unset, the daemon is up.
+if [ "${1:-}" = daemon ]; then
+  d=${FM_FAKE_NM_DIR:-}
+  [ -z "$d" ] || printf '%s\n' "$*" >> "$d/calls"
+  case "${2:-}" in
+    status)
+      if [ -z "$d" ] || [ -e "$d/daemon-up" ]; then
+        printf '%s\n' '  ● daemon running (pid 1234)'
+      else
+        printf '%s\n' '  ○ daemon not running'
+      fi
+      exit 0 ;;
+    start)
+      [ -z "${FM_FAKE_NM_START_FAIL:-}" ] || { printf '%s\n' "$FM_FAKE_NM_START_FAIL" >&2; exit 1; }
+      [ -z "$d" ] || : > "$d/daemon-up"
+      exit 0 ;;
+    *) exit 0 ;;
+  esac
+fi
 exit 0
 SH
   chmod +x "$fakebin/no-mistakes"
@@ -316,6 +336,42 @@ manual backlog backend still requires missing tasks-axi^1^-^1^manual^exact^MISSI
 manual backlog backend suppresses tasks-axi availability^1^0.2.6^1^manual^empty^^
 ROWS
   pass "bootstrap reports treehouse lease + tasks-axi/quota-axi bootstrap contracts"
+}
+
+test_no_mistakes_daemon_is_started_only_when_it_is_down() {
+  local case_dir fakebin out nm
+  case_dir="$TMP_ROOT/nm-daemon"
+  nm="$case_dir/nm"
+  mkdir -p "$case_dir/home/config" "$nm"
+  printf '%s\n' manual > "$case_dir/home/config/backlog-backend"
+  fakebin=$(make_fake_toolchain "$case_dir")
+
+  : > "$nm/daemon-up"
+  out=$(PATH="$fakebin:$BASE_PATH" FM_HOME="$case_dir/home" FM_ROOT_OVERRIDE="$case_dir/home" \
+    FM_FAKE_TREEHOUSE_LEASE_HELP=1 FM_FAKE_NM_DIR="$nm" "$ROOT/bin/fm-bootstrap.sh")
+  [ -z "$out" ] || fail "a running daemon should stay silent, got: $out"
+  assert_no_grep "daemon start" "$nm/calls" "a running daemon must never be started, restarted, or refreshed"
+  assert_no_grep "daemon stop" "$nm/calls" "a running daemon must never be stopped"
+  assert_no_grep "daemon restart" "$nm/calls" "a running daemon must never be restarted"
+
+  rm -f "$nm/daemon-up" "$nm/calls"
+  out=$(PATH="$fakebin:$BASE_PATH" FM_HOME="$case_dir/home" FM_ROOT_OVERRIDE="$case_dir/home" \
+    FM_FAKE_TREEHOUSE_LEASE_HELP=1 FM_FAKE_NM_DIR="$nm" "$ROOT/bin/fm-bootstrap.sh")
+  assert_contains "$out" "BOOTSTRAP_INFO: no-mistakes daemon was not running; started it" "a stopped daemon should be started and reported"
+  assert_grep "daemon start" "$nm/calls" "a stopped daemon should be started"
+  [ -e "$nm/daemon-up" ] || fail "the daemon should be running after bootstrap"
+
+  rm -f "$nm/daemon-up" "$nm/calls"
+  : > "$nm/calls"
+  out=$(PATH="$fakebin:$BASE_PATH" FM_HOME="$case_dir/home" FM_ROOT_OVERRIDE="$case_dir/home" \
+    FM_BOOTSTRAP_DETECT_ONLY=1 FM_FAKE_TREEHOUSE_LEASE_HELP=1 FM_FAKE_NM_DIR="$nm" "$ROOT/bin/fm-bootstrap.sh")
+  assert_no_grep "daemon start" "$nm/calls" "a read-only detect session must not start the daemon"
+
+  out=$(PATH="$fakebin:$BASE_PATH" FM_HOME="$case_dir/home" FM_ROOT_OVERRIDE="$case_dir/home" \
+    FM_FAKE_TREEHOUSE_LEASE_HELP=1 FM_FAKE_NM_DIR="$nm" FM_FAKE_NM_START_FAIL="boom: socket refused" "$ROOT/bin/fm-bootstrap.sh")
+  assert_contains "$out" "NO_MISTAKES_DAEMON: could not start the no-mistakes daemon: boom: socket refused" \
+    "a failed daemon start should be reported with its error"
+  pass "bootstrap starts the no-mistakes daemon only when down, never in detect-only mode, and reports a failed start"
 }
 
 test_no_mistakes_min_version() {
@@ -1277,6 +1333,7 @@ ROWS
 }
 
 test_bootstrap_reporting
+test_no_mistakes_daemon_is_started_only_when_it_is_down
 test_no_mistakes_min_version
 test_gh_axi_min_version
 test_lavish_axi_min_version
