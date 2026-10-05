@@ -355,6 +355,8 @@ unset _teardown_source
 . "$SCRIPT_DIR/fm-backlog-transition-lib.sh"
 # shellcheck source=bin/fm-backend.sh
 . "$SCRIPT_DIR/fm-backend.sh"
+# shellcheck source=bin/fm-psmux-lib.sh
+. "$SCRIPT_DIR/fm-psmux-lib.sh"
 # shellcheck source=bin/fm-control-lib.sh
 . "$SCRIPT_DIR/fm-control-lib.sh"
 # shellcheck source=bin/fm-lock-lib.sh
@@ -2148,6 +2150,15 @@ reap_task_backend_process_group() {  # <label>
   local label=$1 leader leader_start pgid current_pgid own_pgid
   if [ "$BACKEND" != tmux ]; then
     echo "warning: lsof is unavailable; cannot resolve a process-group fallback for $BACKEND task $ID" >&2
+    return 0
+  fi
+  # psmux's #{pane_pid} is a Win32 PID: MSYS ps and kill cannot identity-check
+  # or signal it, and the process-group reap below would act on whatever MSYS
+  # process happens to share that number. Step aside rather than guess;
+  # psmux's own kill-window already ends the pane's process tree
+  # (docs/tmux-backend.md "psmux on Windows").
+  if fm_psmux_active; then
+    echo "warning: lsof is unavailable and psmux reports Windows pane PIDs this shell cannot signal; skipping the $label process-group reap for $ID (processes that escaped the pane keep running; stop them by hand if the worktree will not remove)" >&2
     return 0
   fi
   leader=$(tmux display-message -p -t "$T" '#{pane_pid}' 2>/dev/null) || leader=""

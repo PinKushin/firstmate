@@ -5,7 +5,10 @@
 #          BOOTSTRAP_INFO no-action fact for completed benign bootstrap work, and
 #          exits 0.
 #          Silent = all good.
-#          Lines: "MISSING: <tool> (install: <command>)",
+#          Lines: "MISSING: <tool> (install: <command>)" (on a Windows shell
+#                 the tmux backend needs psmux: a missing tmux reports
+#                 "MISSING: tmux (install: <psmux command>)" and a tmux that is
+#                 not psmux reports "MISSING: psmux (install: <psmux command>)"),
 #                 "PRESENTATION_UNAVAILABLE: lavish-axi (requires >=<floor>; install: <command>) - nonvisual work may proceed with plain-text decisions and reports; install or upgrade before using Lavish",
 #                 "MISSING_MANUAL: <tool> (instructions: <url>)", "NEEDS_GH_AUTH",
 #                 "BACKEND_INVALID: <name> (known: <names>)",
@@ -190,6 +193,8 @@ DATA="${FM_DATA_OVERRIDE:-$FM_HOME/data}"
 . "$SCRIPT_DIR/fm-ff-lib.sh"
 # shellcheck source=bin/fm-cursor-lib.sh disable=SC1091
 . "$SCRIPT_DIR/fm-cursor-lib.sh"
+# shellcheck source=bin/fm-psmux-lib.sh disable=SC1091
+. "$SCRIPT_DIR/fm-psmux-lib.sh"
 # shellcheck source=bin/fm-config-inherit-lib.sh disable=SC1091
 . "$SCRIPT_DIR/fm-config-inherit-lib.sh"
 # shellcheck source=bin/fm-secondmate-nudge-lib.sh disable=SC1091
@@ -800,7 +805,17 @@ secondmate_handoff_detect() {
 
 install_cmd() {
   case "$1" in
-    tmux|node|git|gh|curl|jq|orca|zellij) echo "brew install $1  # or the platform's package manager" ;;
+    tmux)
+      # On a Windows shell the tmux Firstmate drives is psmux, never a brew formula.
+      if fm_psmux_host_is_windows; then
+        fm_psmux_install_hint
+        echo
+      else
+        echo "brew install $1  # or the platform's package manager"
+      fi
+      ;;
+    psmux) fm_psmux_install_hint; echo ;;
+    node|git|gh|curl|jq|orca|zellij) echo "brew install $1  # or the platform's package manager" ;;
     cmux) echo "brew install --cask cmux  # or see https://cmux.com" ;;
     treehouse) echo "curl -fsSL https://kunchenguid.github.io/treehouse/install.sh | sh" ;;
     no-mistakes) echo "curl -fsSL https://raw.githubusercontent.com/kunchenguid/no-mistakes/main/docs/install.sh | sh" ;;
@@ -1412,6 +1427,13 @@ detect_local_tools() {
     fm_backend_required_tool_available "$BACKEND" "$t" \
       || missing_tool_diagnostic "$t"
   done
+  # A Windows shell (Git Bash) supports the tmux backend only through psmux. A
+  # missing tmux is already reported above with the psmux install hint; a tmux
+  # that is present but is not psmux (an MSYS2 or Cygwin build) is reported here.
+  if [ "$BACKEND" = tmux ] && fm_psmux_host_is_windows \
+    && command -v tmux >/dev/null 2>&1 && ! fm_psmux_active; then
+    missing_tool_diagnostic psmux
+  fi
   for t in $COMMON_TOOLS; do
     command -v "$t" >/dev/null || missing_tool_diagnostic "$t"
   done
