@@ -98,6 +98,10 @@ SH
   chmod +x "$fakebin/treehouse"
   cat > "$fakebin/no-mistakes" <<'SH'
 #!/usr/bin/env bash
+if [ "${1:-}" = daemon ] && [ "${2:-}" = status ]; then
+  printf '%s\n' '  ● daemon running (pid 1234)'
+  exit 0
+fi
 if [ "${1:-}" = --version ]; then
   printf '%s\n' 'no-mistakes version v1.46.0 (fake) 2026-06-27T00:02:18Z'
   exit 0
@@ -1828,6 +1832,10 @@ EOF
   cat > "$fakebin/no-mistakes" <<'SH'
 #!/usr/bin/env bash
 set -u
+if [ "${1:-}" = daemon ] && [ "${2:-}" = status ]; then
+  printf '%s\n' '  ● daemon running (pid 1234)'
+  exit 0
+fi
 if [ "${1:-}" = --version ]; then
   printf '%s\n' 'no-mistakes version v1.46.0 (fake) 2026-06-27T00:02:18Z'
   exit 0
