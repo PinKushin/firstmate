@@ -253,6 +253,10 @@ SH
   # fail.
   cat > "$fakebin/no-mistakes" <<'SH'
 #!/usr/bin/env bash
+if [ "${1:-} ${2:-}" = "daemon status" ]; then
+  printf '%s\n' '  ● daemon running (pid 1234)'
+  exit 0
+fi
 [ -z "${FM_TEST_NM_LOG:-}" ] || printf '%s\n' "$*" >> "$FM_TEST_NM_LOG"
 [ "${1:-} ${2:-}" = "axi status" ] || exit 2
 [ "${FM_TEST_NM_FAIL:-0}" = 0 ] || exit 1
