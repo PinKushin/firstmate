@@ -101,6 +101,8 @@ Without that baseline, an `unknown` verdict is preserved untouched, so a busy-lo
 
 ## psmux on Windows
 
+Git Bash only makes real symlinks with Developer Mode (or administrator rights) and `MSYS=winsymlinks:nativestrict`; otherwise `ln -s` copies and every link-based lock refuses. `bin/fm-wake-lib.sh` prints this requirement when a lock cannot be created on such a shell.
+
 [psmux](https://github.com/psmux/psmux) is a native Windows terminal multiplexer that speaks tmux's command language and installs itself as `psmux`, `pmux`, and `tmux`.
 Firstmate drives it through the same tmux backend, from Git Bash, with no separate backend name.
 `bin/fm-psmux-lib.sh` owns every decision that differs, and each of them engages only when psmux is detected, so Linux and macOS tmux behavior is unchanged.

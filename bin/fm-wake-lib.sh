@@ -581,6 +581,28 @@ fm_lock_claim() {
   return 0
 }
 
+# Git Bash/MSYS `ln -s` silently copies unless native symlinks are enabled, and
+# every link-based lock below then reads as "held by another operation".
+# Probe once per process and say what to change instead of leaving that misleading.
+_FM_SYMLINK_CHECKED=
+fm_symlink_check_once() {
+  [ -n "$_FM_SYMLINK_CHECKED" ] && return 0
+  _FM_SYMLINK_CHECKED=1
+  case "$_FM_UNAME" in MINGW*|MSYS*|CYGWIN*) ;; *) return 0 ;; esac
+  local probe="$STATE/.symlink-probe.$$"
+  rm -rf "$probe" "$probe.t" 2>/dev/null || true
+  : >"$probe.t"
+  if ln -s "$probe.t" "$probe" 2>/dev/null && [ -L "$probe" ]; then
+    rm -f "$probe" "$probe.t" 2>/dev/null || true
+    return 0
+  fi
+  rm -rf "$probe" "$probe.t" 2>/dev/null || true
+  printf '%s\n' "firstmate: this Windows shell cannot create real symlinks, so locks will refuse." \
+    "  Enable Developer Mode (or run as administrator) and set MSYS=winsymlinks:nativestrict" \
+    "  before starting Git Bash. See docs/tmux-backend.md (psmux on Windows)." >&2
+  return 0
+}
+
 fm_lock_try_create() {
   local lockdir=$1 allowed_steal_owner=${2:-} ownerdir
   FM_LOCK_OWNER_DIR=
@@ -603,6 +625,7 @@ fm_lock_try_create() {
     fi
   else
     fm_lock_remove_stray_owner_link "$lockdir" "$ownerdir"
+    fm_symlink_check_once
   fi
   fm_lock_discard_owner "$ownerdir"
   return 1
