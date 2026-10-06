@@ -11,6 +11,9 @@
 #
 # Each case runs in its own bash so detection, which is decided when the
 # library is sourced, is exercised exactly as a script would meet it.
+# The single-quoted snippets handed to run_case are deliberately unexpanded here:
+# they are evaluated by the child shell, which owns the variables they name.
+# shellcheck disable=SC2016
 set -u
 
 # shellcheck source=tests/lib.sh

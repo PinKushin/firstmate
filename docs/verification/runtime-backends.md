@@ -131,6 +131,15 @@ zsh
 A persistent parent shell waiting for a child remained reported as the parent process, while a shell that directly execed a simple command changed identity with the process itself.
 Pi and pi-signed 0.82.0 were reverified on 2026-07-27 through real isolated `fm-spawn.sh` launches.
 
+### psmux
+
+Recorded 2026-10-06 against psmux commit `dd695ea` (reports version 3.3.8; the v3.3.8 release tag is hundreds of commits older and also reports 3.3.8).
+
+The fake-driven suite `tests/fm-psmux.test.sh` passes on Linux and covers detection precedence, process-name normalization, path conversion, the task-window shell, and the argument-conversion guard.
+The real-psmux evidence comes from the `Windows psmux backend` workflow (`.github/workflows/windows-psmux.yml`), which builds psmux from that commit on `windows-latest` and runs `tests/fm-backend-psmux-live-e2e.test.sh` under Git Bash.
+That run prints one `MEASUREMENT: <fact> | <value>` line per psmux fact the adapter depends on and writes them to the job summary.
+No psmux behavior has been measured outside that job, so the facts above are claims about psmux's documented behavior until a green run's measurements are added here.
+
 ### Agent liveness name sources
 
 The earlier record that every harness is observed under its own `#{pane_current_command}` no longer holds and has been replaced by the per-harness evidence below.
