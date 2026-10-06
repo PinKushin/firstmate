@@ -1,0 +1,26 @@
+shard0 rc=0
+## Shard 0
+
+passed: 1  failed: 0
+
+```
+```
+a.test.sh | rc=0 | 0s | 
+shard1 rc=0
+## Shard 1
+
+passed: 0  failed: 1
+
+```
+b.test.sh | rc=1 | 0s | not ok 1 - x
+```
+b.test.sh | rc=1 | 0s | not ok 1 - x
+shard2 rc=0
+## Shard 2
+
+passed: 0  failed: 1
+
+```
+c.test.sh | rc=127 | 0s | tests/c.test.sh: line 1: nosuchcmd: command not found
+```
+c.test.sh | rc=127 | 0s | tests/c.test.sh: line 1: nosuchcmd: command not found
