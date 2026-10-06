@@ -40,6 +40,10 @@ fm_test_fake_no_mistakes() {
   local fakebin=$1
   cat > "$fakebin/no-mistakes" <<SH
 #!/usr/bin/env bash
+if [ "\${1:-}" = daemon ] && [ "\${2:-}" = status ]; then
+  printf '%s\\n' '  ● daemon running (pid 1234)'
+  exit 0
+fi
 if [ "\${1:-}" = --version ]; then
   printf '%s\\n' "\${FM_FAKE_NO_MISTAKES_VERSION:-$FM_TEST_NO_MISTAKES_FAKE_VERSION}"
   exit 0

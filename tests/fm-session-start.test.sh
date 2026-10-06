@@ -98,6 +98,10 @@ SH
   chmod +x "$fakebin/treehouse"
   cat > "$fakebin/no-mistakes" <<'SH'
 #!/usr/bin/env bash
+if [ "${1:-}" = daemon ] && [ "${2:-}" = status ]; then
+  printf '%s\n' '  ● daemon running (pid 1234)'
+  exit 0
+fi
 if [ "${1:-}" = --version ]; then
   printf '%s\n' 'no-mistakes version v1.46.0 (fake) 2026-06-27T00:02:18Z'
   exit 0
@@ -1399,6 +1403,35 @@ EOF
   pass "tmux endpoint liveness is reported per task: alive for a live window, dead for a gone one"
 }
 
+test_reboot_recovery_is_reported_for_this_homes_dead_tmux_workers() {
+  local rec root home fakebin out
+  rec=$(new_world reboot-recovery)
+  IFS='|' read -r root home fakebin <<EOF
+$rec
+EOF
+  make_fake_toolchain "$fakebin"
+  make_fake_ps_claude "$fakebin"
+  make_fake_tmux "$fakebin" "fm-sess:live-window"
+  printf '%s\n' 22222222-aaaa-bbbb-cccc-000000000002 > "$root/boot-id"
+
+  printf 'window=fm-sess:rebooted\nkind=ship\nboot_id=11111111-aaaa-bbbb-cccc-000000000001\n' > "$home/state/task-rebooted.meta"
+  printf 'window=fm-sess:rebooted-scout\nkind=scout\nboot_id=11111111-aaaa-bbbb-cccc-000000000001\n' > "$home/state/task-scout.meta"
+  printf 'window=fm-sess:sameboot\nkind=ship\nboot_id=22222222-aaaa-bbbb-cccc-000000000002\n' > "$home/state/task-sameboot.meta"
+  printf 'window=fm-sess:unrecorded\nkind=ship\n' > "$home/state/task-unrecorded.meta"
+  printf 'window=fm-sess:mate\nkind=secondmate\nboot_id=11111111-aaaa-bbbb-cccc-000000000001\n' > "$home/state/task-mate.meta"
+  printf 'window=fm-sess:live-window\nkind=ship\nboot_id=11111111-aaaa-bbbb-cccc-000000000001\n' > "$home/state/task-live.meta"
+
+  out=$(FM_BOOT_ID_FILE="$root/boot-id" run_session_start "$home" "$root" "$fakebin:$BASE_PATH")
+  assert_contains "$out" 'bin/fm-control.sh task-rebooted relaunch --note' "a ship dead under a changed boot should name its relaunch command"
+  assert_contains "$out" 'bin/fm-control.sh task-scout relaunch --note' "a scout dead under a changed boot should name its relaunch command"
+  assert_not_contains "$out" 'fm-control.sh task-sameboot ' "an unchanged boot is an ordinary dead endpoint, not a reboot"
+  assert_not_contains "$out" 'fm-control.sh task-unrecorded ' "a record with no boot identity proves nothing"
+  assert_not_contains "$out" 'fm-control.sh task-mate ' "a secondmate has its own respawn path"
+  assert_not_contains "$out" 'fm-control.sh task-live ' "a live endpoint needs no recovery"
+
+  pass "session start reports a reboot recovery command only for this home's dead tmux ship and scout records"
+}
+
 test_endpoint_liveness_herdr() {
   local rec root home fakebin out
   rec=$(new_world liveness-herdr)
@@ -1799,6 +1832,10 @@ EOF
   cat > "$fakebin/no-mistakes" <<'SH'
 #!/usr/bin/env bash
 set -u
+if [ "${1:-}" = daemon ] && [ "${2:-}" = status ]; then
+  printf '%s\n' '  ● daemon running (pid 1234)'
+  exit 0
+fi
 if [ "${1:-}" = --version ]; then
   printf '%s\n' 'no-mistakes version v1.46.0 (fake) 2026-06-27T00:02:18Z'
   exit 0
@@ -3040,6 +3077,7 @@ test_status_tail_line_cap
 test_orphan_status_logs_are_printed
 test_endpoint_liveness_tmux
 test_endpoint_liveness_herdr
+test_reboot_recovery_is_reported_for_this_homes_dead_tmux_workers
 test_endpoint_read_death_is_isolated_and_reported
 test_endpoint_read_hang_is_bounded_and_reported
 test_endpoint_bound_rejects_padded_zero

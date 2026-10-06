@@ -373,6 +373,10 @@ if [ "${1:-}" = --version ]; then
   printf '%s\n' 'no-mistakes version v1.46.0 (fake)'
   exit 0
 fi
+if [ "${1:-}" = daemon ] && [ "${2:-}" = status ]; then
+  printf '%s\n' '  ● daemon running (pid 1234)'
+  exit 0
+fi
 exit 0
 SH
   chmod +x "$fakebin/no-mistakes"
