@@ -146,6 +146,34 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
           exit "$rc"
 
+      - name: Probe psmux kill and foreground-process variants
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 8
+        run: |
+          # Diagnostic only: measures which target forms psmux's kill-window
+          # accepts and whether a native Windows child shows up as
+          # #{pane_current_command}. Output is recorded, never asserted.
+          export MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*'
+          T="tmux -L probe"
+          show() { printf 'PROBE: %s | %s\n' "$1" "$(printf '%s' "$2" | tr '\r\n' '  ')"; }
+          $T new-session -d -s probe -n w1 >/dev/null 2>&1
+          show 'list-windows after new-session' "$($T list-windows -t probe -F '#{window_name}' 2>&1)"
+          $T send-keys -t probe:w1 -l 'ping -n 300 127.0.0.1 > /dev/null' && $T send-keys -t probe:w1 Enter
+          for i in 1 2 3 4 5 6 7 8; do
+            sleep 3
+            show "pane_current_command with a native ping child (t=$((i*3))s)" "$($T display-message -p -t probe:w1 '#{pane_current_command}' 2>&1)"
+          done
+          show 'pane_pid' "$($T display-message -p -t probe:w1 '#{pane_pid}' 2>&1)"
+          for form in '=probe:=w1' 'probe:=w1' '=probe:w1' 'probe:w1'; do
+            out=$(timeout 60 $T kill-window -t "$form" 2>&1); rc=$?
+            show "kill-window -t $form" "rc=$rc $out"
+            left=$($T list-windows -t probe -F '#{window_name}' 2>&1)
+            show "windows left after kill-window -t $form" "$left"
+            case "$left" in *w1*) ;; *) break ;; esac
+          done
+          $T kill-server >/dev/null 2>&1 || true
+
       - name: Upload the live log
         if: always()
         uses: actions/upload-artifact@v4
