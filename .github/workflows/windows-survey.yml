@@ -67,6 +67,15 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
           cp "$out/results.txt" "$out/summary-shard-${{ matrix.shard }}.txt"
+          # The job summary is not readable through the API, so the results also go to the log.
+          echo "SURVEY_RESULTS_BEGIN shard ${{ matrix.shard }}"
+          cat "$out/results.txt"
+          echo "SURVEY_RESULTS_END"
+          for f in $(grep -v '| rc=0 |' "$out/results.txt" | cut -d' ' -f1); do
+            echo "SURVEY_TAIL_BEGIN $f"
+            grep -E '^(not ok|error:|.*command not found|.*No such file|.*[Pp]ermission denied)' "$out/$f.log" | head -6 | cut -c1-220
+            echo "SURVEY_TAIL_END"
+          done
 
       - name: Upload logs
         if: always()
