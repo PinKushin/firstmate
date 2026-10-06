@@ -261,15 +261,20 @@ check 'the normalized current_path is an existing directory in Git Bash' "$rc" "
 
 # --- 6. agent liveness: classification by pane_current_command ------------------
 
-# A copy of an MSYS binary under an agent name stands in for a harness process:
-# psmux names a pane by the executable's file stem, which is all the classifier
-# reads. The copy runs from AGENT_DIR so the Windows-side census can find it.
-cp "$(command -v sleep)" "$AGENT_DIR/claude.exe"
-cp "$(command -v sleep)" "$AGENT_DIR/node.exe"
+# A copy of a NATIVE Windows binary (the runner's own node.exe) under an agent
+# name stands in for a harness process: psmux names a pane by the executable's
+# file stem, which is all the classifier reads. An MSYS binary does not work as a
+# stand-in - psmux keeps reporting the shell for an MSYS child (measured on
+# windows-latest, psmux dd695ea) - and a real harness is a native executable.
+# The copy runs from AGENT_DIR so the Windows-side census can find it.
+NATIVE_NODE=$(command -v node) || { echo 'not ok - no native node.exe on PATH for the agent stand-in'; exit 1; }
+cp "$NATIVE_NODE" "$AGENT_DIR/claude.exe"
+cp "$NATIVE_NODE" "$AGENT_DIR/node.exe"
+HOLD="-e 'setTimeout(function(){},300000)'"
 
 check_eq 'an idle Git Bash task window is a dead agent (shell only)' "$(fm_backend_tmux_agent_state "$TARGET")" dead
 
-fm_backend_tmux_send_literal "$TARGET" "'$AGENT_DIR/claude.exe' 300" && fm_backend_tmux_send_key "$TARGET" Enter
+fm_backend_tmux_send_literal "$TARGET" "'$AGENT_DIR/claude.exe' $HOLD" && fm_backend_tmux_send_key "$TARGET" Enter
 agent_name() { fm_psmux_normalize_name "$(fm_backend_tmux_current_command "$TARGET")"; }
 agent_is_claude() { [ "$(agent_name)" = claude ]; }
 wait_for 20 agent_is_claude
@@ -284,7 +289,7 @@ wait_for 20 back_to_bash
 check 'C-c ends the child and the pane reads bash again' $? "got '$(fm_backend_tmux_current_command "$TARGET")'"
 check_eq 'agent_state reports dead again after the child exits' "$(fm_backend_tmux_agent_state "$TARGET")" dead
 
-fm_backend_tmux_send_literal "$TARGET" "'$AGENT_DIR/node.exe' 300" && fm_backend_tmux_send_key "$TARGET" Enter
+fm_backend_tmux_send_literal "$TARGET" "'$AGENT_DIR/node.exe' $HOLD" && fm_backend_tmux_send_key "$TARGET" Enter
 agent_is_node() { [ "$(agent_name)" = node ]; }
 wait_for 20 agent_is_node
 check 'a node.exe child makes pane_current_command read node' $? "got '$(fm_backend_tmux_current_command "$TARGET")'"
@@ -294,7 +299,7 @@ wait_for 20 back_to_bash || true
 
 # --- 7. endpoint close reaps the pane's whole process tree -----------------------
 
-fm_backend_tmux_send_literal "$TARGET" "'$AGENT_DIR/claude.exe' 300" && fm_backend_tmux_send_key "$TARGET" Enter
+fm_backend_tmux_send_literal "$TARGET" "'$AGENT_DIR/claude.exe' $HOLD" && fm_backend_tmux_send_key "$TARGET" Enter
 wait_for 20 agent_is_claude || true
 running_before=$(win_agent_count)
 measure 'Windows processes under the agent directory before the window is killed' "$running_before"
