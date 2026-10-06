@@ -24,6 +24,10 @@ jobs:
       fail-fast: false
       matrix:
         shard: [0, 1, 2, 3, 4, 5]
+    env:
+      # Git Bash turns `ln -s` into a file copy unless native symlinks are requested,
+      # and Firstmate's link locks and symlinked homes depend on real links.
+      MSYS: winsymlinks:nativestrict
     defaults:
       run:
         shell: bash
