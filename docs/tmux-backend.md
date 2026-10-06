@@ -113,7 +113,7 @@ Firstmate drives it through the same tmux backend, from Git Bash, with no separa
 - **Install hint:** bootstrap prints the psmux install commands when it detects a Windows shell with no multiplexer.
 
 This is phase 1 of Windows support: the multiplexer backend only.
-PID-based liveness, NTFS permission checks, symlinks, python3-dependent scripts, and per-harness Windows bring-up are not covered.
+PID-based liveness (including teardown's process-group reap, which is skipped with a warning when `lsof` is unavailable), NTFS permission checks, symlinks, python3-dependent scripts, and per-harness Windows bring-up are not covered.
 
 `tests/fm-psmux.test.sh` covers the logic with a fake psmux on any host.
 `tests/fm-backend-psmux-live-e2e.test.sh` drives a real psmux and runs in the `Windows psmux backend` workflow on `windows-latest`.
