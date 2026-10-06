@@ -220,9 +220,20 @@ fm_backend_tmux_kill() {  # <target>
   esac
   # psmux accepts `=<session>` but answers `can't find window: =<name>` for the
   # exact-match prefix on the window part (measured on windows-latest, psmux
-  # dd695ea), so under psmux the window is named plainly. The caller has
-  # already confirmed the exact name against the inventory.
+  # dd695ea), so under psmux the window is named plainly. A plain name resolves
+  # by prefix, so the exact name is confirmed against the inventory first and
+  # an absent window is never handed to kill-window (it could hit a sibling).
   if fm_psmux_active; then
+    windows=$(fm_backend_tmux_window_inventory "=$session")
+    inventory_status=$?
+    if [ "$inventory_status" -eq 2 ]; then
+      return 0
+    fi
+    if [ "$inventory_status" -ne 0 ]; then
+      echo "error: tmux window $session:$window could not be read before its close, so whether it exists is unknown" >&2
+      return 1
+    fi
+    printf '%s\n' "$windows" | grep -qxF -- "$window" || return 0
     tmux kill-window -t "=$session:$window" 2>/dev/null && return 0
   else
     tmux kill-window -t "=$session:=$window" 2>/dev/null && return 0
