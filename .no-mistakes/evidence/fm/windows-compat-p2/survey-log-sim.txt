@@ -1,0 +1,25 @@
+SURVEY_RESULTS_BEGIN shard 0
+a.test.sh | rc=0 | 0s | 
+SURVEY_RESULTS_END
+exit=0
+SURVEY_RESULTS_BEGIN shard 0
+b.test.sh | rc=1 | 0s | not ok 1 - boom
+SURVEY_RESULTS_END
+SURVEY_TAIL_BEGIN b.test.sh
+not ok 1 - boom
+SURVEY_TAIL_END
+exit=0
+SURVEY_RESULTS_BEGIN shard 0
+c.test.sh | rc=127 | 0s | tests/c.test.sh: line 1: foo_nonexistent_cmd: command not found
+SURVEY_RESULTS_END
+SURVEY_TAIL_BEGIN c.test.sh
+tests/c.test.sh: line 1: foo_nonexistent_cmd: command not found
+SURVEY_TAIL_END
+exit=0
+SURVEY_RESULTS_BEGIN shard 0
+d.test.sh | rc=2 | 0s | not ok 2 - x
+SURVEY_RESULTS_END
+SURVEY_TAIL_BEGIN d.test.sh
+not ok 2 - x
+SURVEY_TAIL_END
+exit=0
