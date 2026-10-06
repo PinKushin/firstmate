@@ -1,0 +1,12 @@
+== MINGW64 + copying ln (expect message once)
+firstmate: this Windows shell cannot create real symlinks, so locks will refuse.
+  Enable Developer Mode (or run as administrator) and set MSYS=winsymlinks:nativestrict
+  before starting Git Bash. See docs/tmux-backend.md (psmux on Windows).
+rc=1
+rc2=1
+== Linux + copying ln (expect no message)
+rc=1
+rc2=1
+== MINGW + real ln (expect lock success, no message)
+rc=1
+rc2=1
