@@ -110,6 +110,7 @@ Firstmate drives it through the same tmux backend, from Git Bash, with no separa
 - **Paths:** psmux reports and expects Windows paths (`C:\Users\x\wt`) while Git Bash uses POSIX paths. `cygpath` converts in both directions.
 - **Process names:** psmux reports the executable's file stem with its real casing (`pwsh`, `Claude`). The agent classifier folds case and extension and counts `pwsh`, `powershell`, and `cmd` as shells.
 - **Argument conversion:** Git Bash rewrites POSIX-looking arguments for native executables, which would corrupt text typed into a pane, so every tmux call under psmux runs with that conversion off.
+- **Closing a window:** psmux rejects the exact-match prefix on the window part of a `kill-window` target (`=session:=name`), so under psmux the window is named plainly (`=session:name`). A plain name resolves by prefix, so the exact name is confirmed against the window inventory first and an absent window is never passed to `kill-window`.
 - **Install hint:** bootstrap prints the psmux install commands when it detects a Windows shell with no multiplexer.
 
 This is phase 1 of Windows support: the multiplexer backend only.
