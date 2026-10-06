@@ -154,6 +154,7 @@ jobs:
           # Diagnostic only: measures which target forms psmux's kill-window
           # accepts and whether a native Windows child shows up as
           # #{pane_current_command}. Output is recorded, never asserted.
+          set +e
           export MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*'
           T="tmux -L probe"
           show() { printf 'PROBE: %s | %s\n' "$1" "$(printf '%s' "$2" | tr '\r\n' '  ')"; }
