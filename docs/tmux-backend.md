@@ -99,6 +99,27 @@ A second, baseline-gated conversion covers harnesses whose mid-turn screen the c
 Without that baseline, an `unknown` verdict is preserved untouched, so a busy-looking pane can never convert an unread composer into a confirmation.
 `tests/fm-tmux-submit-busy.test.sh` covers busy and idle panes with proven, ambiguous, and cleared composers.
 
+## psmux on Windows
+
+[psmux](https://github.com/psmux/psmux) is a native Windows terminal multiplexer that speaks tmux's command language and installs itself as `psmux`, `pmux`, and `tmux`.
+Firstmate drives it through the same tmux backend, from Git Bash, with no separate backend name.
+`bin/fm-psmux-lib.sh` owns every decision that differs, and each of them engages only when psmux is detected, so Linux and macOS tmux behavior is unchanged.
+
+- **Detection:** `FM_TMUX_FLAVOR=psmux|tmux` overrides everything. Otherwise a non-empty `PSMUX_SESSION` (psmux sets it in every pane it spawns) selects psmux, and on a Windows shell `tmux -V` printing a second line that starts `psmux ` does too.
+- **Task window shell:** new psmux panes default to PowerShell, but everything Firstmate types is bash, so the task window launches Git Bash explicitly as the `new-window` command. It never edits the user's psmux `default-shell`. `FM_PSMUX_BASH` names a different bash.
+- **Paths:** psmux reports and expects Windows paths (`C:\Users\x\wt`) while Git Bash uses POSIX paths. `cygpath` converts in both directions.
+- **Process names:** psmux reports the executable's file stem with its real casing (`pwsh`, `Claude`). The agent classifier folds case and extension and counts `pwsh`, `powershell`, and `cmd` as shells. psmux reports a native Windows child as the pane command but keeps reporting the shell for an MSYS child (measured on psmux `dd695ea`), so an MSYS-built harness reads as a shell there; the live test's agent stand-in is therefore a native binary.
+- **Argument conversion:** Git Bash rewrites POSIX-looking arguments for native executables, which would corrupt text typed into a pane, so every tmux call under psmux runs with that conversion off.
+- **Closing a window:** psmux rejects the exact-match prefix on the window part of a `kill-window` target (`=session:=name`), so under psmux the window is named plainly (`=session:name`). A plain name resolves by prefix, so the exact name is confirmed against the window inventory first and an absent window is never passed to `kill-window`.
+- **Install hint:** bootstrap prints the psmux install commands when it detects a Windows shell with no multiplexer.
+
+This is phase 1 of Windows support: the multiplexer backend only.
+PID-based liveness (including teardown's process-group reap, which is skipped with a warning when `lsof` is unavailable), NTFS permission checks, symlinks, python3-dependent scripts, and per-harness Windows bring-up are not covered.
+
+`tests/fm-psmux.test.sh` covers the logic with a fake psmux on any host.
+`tests/fm-backend-psmux-live-e2e.test.sh` drives a real psmux and runs in the `Windows psmux backend` workflow on `windows-latest`.
+It builds psmux from the pinned commit rather than the v3.3.8 release asset, because the release predates that commit by hundreds of commits while both report version 3.3.8.
+
 ## Limits and regression entry points
 
 - tmux is the reference path and supports secondmate homes.
@@ -114,6 +135,7 @@ tests/fm-muse-harness.test.sh
 tests/fm-omp-harness.test.sh
 tests/fm-tmux-submit-busy.test.sh
 tests/fm-bootstrap.test.sh
+tests/fm-psmux.test.sh
 ```
 
 [`verification/runtime-backends.md`](verification/runtime-backends.md#tmux) records the active foreground-process and submit evidence.

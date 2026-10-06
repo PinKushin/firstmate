@@ -1,0 +1,188 @@
+name: Windows psmux backend
+
+# Drives a REAL psmux through Firstmate's tmux backend adapter on a GitHub-hosted
+# windows-latest runner, under Git Bash, end to end: detection, task window
+# creation, typed input, capture, agent liveness, endpoint close, and whole
+# session loss. tests/fm-backend-psmux-live-e2e.test.sh owns the checks and
+# prints one `MEASUREMENT:` line per psmux fact the adapter depends on;
+# docs/tmux-backend.md "psmux on Windows" owns the user-facing contract and
+# docs/verification/runtime-backends.md "psmux" the dated record.
+#
+# psmux is built from the pinned commit below rather than installed from a
+# package, because the released v3.3.8 asset (tag commit 66cf613) predates this
+# commit by hundreds of commits while both report version 3.3.8. A maintainer can
+# aim a manual run at any other ref (a release tag included) with `psmux_ref`
+# and compare the MEASUREMENT lines.
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/windows-psmux.yml'
+      - 'bin/backends/tmux.sh'
+      - 'bin/fm-agent-process-lib.sh'
+      - 'bin/fm-psmux-lib.sh'
+      - 'bin/fm-tmux-lib.sh'
+      - 'tests/fm-backend-psmux-live-e2e.test.sh'
+      - 'tests/lib.sh'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/windows-psmux.yml'
+      - 'bin/backends/tmux.sh'
+      - 'bin/fm-agent-process-lib.sh'
+      - 'bin/fm-psmux-lib.sh'
+      - 'bin/fm-tmux-lib.sh'
+      - 'tests/fm-backend-psmux-live-e2e.test.sh'
+      - 'tests/lib.sh'
+  workflow_dispatch:
+    inputs:
+      psmux_ref:
+        description: 'psmux git ref to build and drive (default: the pinned commit)'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-psmux-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # psmux v3.3.8 development build (psmux/psmux commit dd695ea, 2026-10-05).
+  PSMUX_PINNED_REF: dd695eafbec9a1085ca08f64cdaed2f65e3c3f5c
+
+jobs:
+  psmux-live:
+    name: Real psmux end to end
+    runs-on: windows-latest
+    # Heavy tier: a cold psmux release build plus the live run. A warm run
+    # restores the cached binary and finishes in minutes.
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Check out psmux
+        uses: actions/checkout@v6
+        with:
+          repository: psmux/psmux
+          ref: ${{ inputs.psmux_ref || env.PSMUX_PINNED_REF }}
+          path: psmux-src
+          persist-credentials: false
+
+      - name: Resolve the psmux commit
+        id: psmux
+        run: |
+          set -eu
+          sha=$(git -C psmux-src rev-parse HEAD)
+          printf 'sha=%s\n' "$sha" >> "$GITHUB_OUTPUT"
+          printf 'psmux source commit: %s\n' "$sha"
+
+      - name: Restore the built psmux binaries
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/psmux-bin
+          key: psmux-bin-${{ runner.os }}-${{ steps.psmux.outputs.sha }}
+
+      - name: Build psmux
+        if: steps.cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        working-directory: psmux-src
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cargo --version
+          rustc --version
+          cargo build --release
+          if ($LASTEXITCODE -ne 0) { throw "cargo build failed with $LASTEXITCODE" }
+          $bin = Join-Path $env:RUNNER_TEMP 'psmux-bin'
+          New-Item -ItemType Directory -Force -Path $bin | Out-Null
+          foreach ($exe in 'psmux.exe', 'pmux.exe', 'tmux.exe') {
+            Copy-Item -LiteralPath (Join-Path 'target\release' $exe) -Destination $bin -ErrorAction Stop
+          }
+
+      - name: Put psmux, pmux, and tmux on PATH
+        run: |
+          set -eu
+          bin="$RUNNER_TEMP/psmux-bin"
+          for exe in psmux pmux tmux; do
+            [ -f "$bin/$exe.exe" ] || { echo "missing $bin/$exe.exe"; exit 1; }
+          done
+          cygpath -w "$bin" >> "$GITHUB_PATH"
+
+      - name: Record the psmux under test
+        run: |
+          set -eu
+          printf 'OSTYPE=%s bash %s\n' "$OSTYPE" "$BASH_VERSION"
+          for exe in psmux pmux tmux; do
+            printf '%s -> %s\n' "$exe" "$(command -v "$exe")"
+            "$exe" -V
+          done
+
+      - name: Drive a real psmux through the tmux backend adapter
+        timeout-minutes: 15
+        env:
+          # An absent psmux is a failure here, never a capability skip.
+          FM_PSMUX_LIVE: '1'
+        run: |
+          set -eu
+          out="$RUNNER_TEMP/psmux-live"
+          mkdir -p "$out"
+          rc=0
+          bash tests/fm-backend-psmux-live-e2e.test.sh 2>&1 | tee "$out/e2e.log" || rc=$?
+          {
+            echo '## psmux live end to end'
+            echo
+            printf '%s\n' "- psmux source commit: \`${{ steps.psmux.outputs.sha }}\`"
+            printf '%s\n' "- Test exit status: \`$rc\`"
+            echo
+            echo '```'
+            grep -E '^(MEASUREMENT:|ok - |not ok - )' "$out/e2e.log" || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$rc"
+
+      - name: Probe psmux kill and foreground-process variants
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 8
+        run: |
+          # Diagnostic only: measures how psmux resolves window targets and
+          # whether a native Windows child shows as #{pane_current_command}.
+          # Output is recorded, never asserted.
+          set +e
+          export MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*'
+          T="tmux -L probe"
+          show() { printf 'PROBE: %s | %s\n' "$1" "$(printf '%s' "$2" | tr '\r\n' '  ')"; }
+          gb=$(cygpath -m "$BASH"); case "$gb" in *.exe) ;; *) gb="$gb.exe" ;; esac
+          $T new-session -d -s probe -n w1 "$gb" >/dev/null 2>&1
+          $T new-window -t probe -n w10 "$gb" >/dev/null 2>&1
+          show 'windows (id name) after setup' "$($T list-windows -t probe -F '#{window_id} #{window_name}' 2>&1)"
+          $T send-keys -t probe:w1 -l 'ping -n 300 127.0.0.1 > /dev/null' && $T send-keys -t probe:w1 Enter
+          for i in 1 2 3 4 5 6 7 8; do
+            sleep 3
+            show "pane_current_command, Git Bash window, native ping child (t=$((i*3))s)" "$($T display-message -p -t probe:w1 '#{pane_current_command}' 2>&1)"
+          done
+          show 'pane_current_command of the idle sibling window' "$($T display-message -p -t probe:w10 '#{pane_current_command}' 2>&1)"
+          show 'pane_pid of the ping window' "$($T display-message -p -t probe:w1 '#{pane_pid}' 2>&1)"
+          # Prefix ambiguity: with w1 and w10 present, which window does each form hit?
+          id10=$($T list-windows -t probe -F '#{window_id} #{window_name}' 2>&1 | awk '$2=="w10"{print $1}')
+          show 'display-message -t =probe:w1 window name' "$($T display-message -p -t '=probe:w1' '#{window_name}' 2>&1)"
+          show "display-message -t =probe:$id10 window name" "$($T display-message -p -t "=probe:$id10" '#{window_name}' 2>&1)"
+          out=$(timeout 60 $T kill-window -t '=probe:w1' 2>&1); rc=$?
+          show 'kill-window -t =probe:w1 (native child running)' "rc=$rc $out"
+          show 'windows left' "$($T list-windows -t probe -F '#{window_id} #{window_name}' 2>&1)"
+          $T kill-server >/dev/null 2>&1
+          true
+
+      - name: Upload the live log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-psmux-${{ github.run_id }}
+          path: ${{ runner.temp }}/psmux-live/e2e.log
+          if-no-files-found: warn
