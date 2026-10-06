@@ -116,7 +116,7 @@ Firstmate drives it through the same tmux backend, from Git Bash, with no separa
 This is phase 1 of Windows support: the multiplexer backend only.
 PID-based liveness (including teardown's process-group reap, which is skipped with a warning when `lsof` is unavailable), NTFS permission checks, symlinks, python3-dependent scripts, and per-harness Windows bring-up are not covered.
 
-The non-gating `Windows compatibility survey` workflow (`.github/workflows/windows-survey.yml`) runs the repo's `tests/*.test.sh` under Git Bash on `windows-latest` and reports which fail and the first failing line, to target later phases at measured breakage.
+The non-gating `Windows compatibility survey` workflow (`.github/workflows/windows-survey.yml`) runs the repo's `tests/*.test.sh` under Git Bash on `windows-latest` and reports which fail and their first failing lines in the job log (the job summary is not readable through the API), to target later phases at measured breakage.
 
 `tests/fm-psmux.test.sh` covers the logic with a fake psmux on any host.
 `tests/fm-backend-psmux-live-e2e.test.sh` drives a real psmux and runs in the `Windows psmux backend` workflow on `windows-latest`.
