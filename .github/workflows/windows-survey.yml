@@ -19,11 +19,11 @@ jobs:
   survey:
     name: Survey shard ${{ matrix.shard }}
     runs-on: windows-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1, 2, 3, 4, 5]
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
     env:
       # Git Bash turns `ln -s` into a file copy unless native symlinks are requested,
       # and Firstmate's link locks and symlinked homes depend on real links.
@@ -67,9 +67,9 @@ jobs:
           : > "$out/results.txt"
           i=0
           for f in tests/*.test.sh; do
-            if [ $((i % 6)) -eq ${{ matrix.shard }} ]; then
+            if [ $((i % 12)) -eq ${{ matrix.shard }} ]; then
               start=$(date +%s)
-              timeout 150 bash "$f" > "$out/$(basename "$f").log" 2>&1
+              timeout 400 bash "$f" > "$out/$(basename "$f").log" 2>&1
               rc=$?
               dur=$(( $(date +%s) - start ))
               first=$(grep -m1 -E '^(not ok|error:|.*: command not found|.*No such file)' "$out/$(basename "$f").log" | cut -c1-200)
