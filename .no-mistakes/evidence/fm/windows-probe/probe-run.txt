@@ -1,0 +1,17 @@
+PROBE_BEGIN ok.test.sh
+PROBE_RC ok.test.sh rc=0
+PROBE_TAIL_BEGIN ok.test.sh
+hello-ok
+PROBE_TAIL_END
+PROBE_BEGIN hang.test.sh
+PROBE_TIMEOUT hang.test.sh - processes at the time of the stall:
+PROBE_RC hang.test.sh rc=124
+PROBE_TAIL_BEGIN hang.test.sh
+before-hang
+PROBE_TAIL_END
+skipping unsafe name: ../evil;x
+PROBE_BEGIN missing.sh
+PROBE_RC missing.sh rc=127
+PROBE_TAIL_BEGIN missing.sh
+bash: tests/missing.sh: No such file or directory
+PROBE_TAIL_END
