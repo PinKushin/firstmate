@@ -219,9 +219,10 @@ run_case() {
   while [ "$#" -gt 0 ] && [ "$1" != -- ]; do envs+=("$1"); shift; done
   shift
   snippet=$1
+  # Default to a POSIX host so the cases hold on a Windows runner too; a case may override FM_PSMUX_HOST.
   env -u PSMUX_SESSION -u FM_TMUX_FLAVOR -u FM_PSMUX_PROBED -u FM_PSMUX_PROBE -u FM_PSMUX_HOST \
     -u FM_PSMUX_BASH -u TMUX \
-    PATH="$FAKEBIN:$PATH" FM_FAKE_STATE="$state" ROOT="$ROOT" "${envs[@]}" \
+    FM_PSMUX_HOST=posix PATH="$FAKEBIN:$PATH" FM_FAKE_STATE="$state" ROOT="$ROOT" "${envs[@]}" \
     bash -c 'set -u; . "$ROOT/bin/fm-backend.sh"; fm_backend_source tmux || exit 99; '"$snippet" 2>&1
 }
 
