@@ -60,6 +60,8 @@ jobs:
         run: |
           set +e
           export TERM=dumb
+          # Tests that build a stripped PATH default to /usr/bin:/bin; Git for Windows keeps git in /mingw64/bin.
+          export FM_TEST_BASE_PATH="/usr/bin:/bin:/usr/sbin:/sbin:/mingw64/bin"
           out="$RUNNER_TEMP/survey"
           mkdir -p "$out"
           : > "$out/results.txt"
