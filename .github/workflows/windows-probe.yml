@@ -1,0 +1,60 @@
+name: Windows test probe
+
+# Diagnostic: runs the named tests/*.test.sh files under Git Bash on windows-latest
+# and prints the tail of each log, plus a process listing when one times out, so a
+# test that hangs on Windows can be located without a local Windows machine. It
+# never gates a merge.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tests:
+        description: 'Space-separated test file names, e.g. "fm-test-run.test.sh fm-task-inbox.test.sh"'
+        required: true
+        default: 'fm-test-run.test.sh'
+      limit:
+        description: 'Per-test time limit in seconds'
+        required: false
+        default: '240'
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    name: Probe
+    runs-on: windows-latest
+    timeout-minutes: 60
+    env:
+      MSYS: winsymlinks:nativestrict
+      FM_TEST_BASE_PATH: /usr/bin:/bin:/usr/sbin:/sbin:/mingw64/bin
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Run the named tests
+        env:
+          PROBE_TESTS: ${{ inputs.tests }}
+          PROBE_LIMIT: ${{ inputs.limit }}
+        run: |
+          set +e
+          export TERM=dumb
+          for t in $PROBE_TESTS; do
+            case "$t" in *[!A-Za-z0-9._-]*|'') echo "skipping unsafe name: $t"; continue ;; esac
+            log="$RUNNER_TEMP/$t.log"
+            echo "PROBE_BEGIN $t"
+            timeout "$PROBE_LIMIT" bash "tests/$t" > "$log" 2>&1 &
+            pid=$!
+            wait "$pid"
+            rc=$?
+            if [ "$rc" -eq 124 ]; then
+              echo "PROBE_TIMEOUT $t - processes at the time of the stall:"
+              ps -W 2>/dev/null | head -40 || ps | head -40
+            fi
+            echo "PROBE_RC $t rc=$rc"
+            echo "PROBE_TAIL_BEGIN $t"
+            tail -n 40 "$log" | cut -c1-220
+            echo "PROBE_TAIL_END"
+          done
