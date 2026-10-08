@@ -34,6 +34,15 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - name: Install test tools
+        # Same best-effort installs as the survey, so a probed test sees the same tools.
+        run: |
+          choco install shellcheck -y --no-progress || echo "shellcheck install failed"
+          npm install -g tasks-axi || echo "tasks-axi install failed"
+          npm_bin=$(cygpath -u "$(npm prefix -g)" 2>/dev/null || true)
+          [ -z "$npm_bin" ] || echo "$(cygpath -w "$npm_bin")" >> "$GITHUB_PATH"
+          [ -z "$npm_bin" ] || echo "FM_TEST_BASE_PATH=/usr/bin:/bin:/usr/sbin:/sbin:/mingw64/bin:$npm_bin" >> "$GITHUB_ENV"
+
       - name: Run the named tests
         env:
           PROBE_TESTS: ${{ inputs.tests }}
