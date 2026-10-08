@@ -119,6 +119,7 @@ This is phase 1 of Windows support: the multiplexer backend only.
 PID-based liveness (including teardown's process-group reap, which is skipped with a warning when `lsof` is unavailable), NTFS permission checks, symlinks, python3-dependent scripts, and per-harness Windows bring-up are not covered.
 
 The non-gating `Windows compatibility survey` workflow (`.github/workflows/windows-survey.yml`) runs the repo's `tests/*.test.sh` under Git Bash on `windows-latest` (after a best-effort install of shellcheck, `tasks-axi`, and a `shasum` shim over `sha*sum`) and reports which fail and their first failing lines in the job log (the job summary is not readable through the API), to target later phases at measured breakage.
+It puts npm's global bin directory on the tests' stripped base PATH (`FM_TEST_BASE_PATH`) so tests find `tasks-axi`; the non-gating `windows-probe.yml` workflow does the same installs and PATH setup for the named tests it reruns.
 
 `tests/fm-psmux.test.sh` covers the logic with a fake psmux on any host.
 `tests/fm-backend-psmux-live-e2e.test.sh` drives a real psmux and runs in the `Windows psmux backend` workflow on `windows-latest`.
